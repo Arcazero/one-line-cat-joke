@@ -1,87 +1,76 @@
 #!/usr/bin/env python3
-"""The One-Line Cat Joke That Lands -- make.fun entry.
+"""Entry for make.fun's "The One-Line Cat Joke That Lands" bounty.
 
-Reads the single one-line joke from joke.txt (kept beside this script),
-validates it, and writes it to /output/entry.txt: the line exactly, with
-no trailing newline. That file is what the bounty judge reads. No network,
-no dependencies, deterministic: the same line every run.
+Takes the single joke line stored in joke.txt (in the same folder as
+this script) and delivers it to the judge as a file: exactly the joke,
+with no trailing newline. Nothing else is produced, nothing is
+downloaded, and running it twice gives the same bytes twice.
 """
 
 import os
 import sys
 
-# Resolve joke.txt against this script's own directory, not the process
-# working directory: the grader runs the program with a different cwd,
-# and a bare relative path would fail to find the file there.
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-JOKE_PATH = os.path.join(SCRIPT_DIR, "joke.txt")
+HERE = os.path.dirname(os.path.abspath(__file__))
+SOURCE = os.path.join(HERE, "joke.txt")
 
 
-def load_joke() -> str:
-    """Read and validate the joke from joke.txt next to this script.
-
-    The file must hold exactly one line plus one trailing newline, and
-    the line must be 1-200 characters with no leading/trailing space.
-    Error messages name the file and the offending value so a failed
-    run says what to fix instead of just failing.
-    """
+def read_joke():
+    """Load the joke and check it is one clean line of 1-200 chars."""
     try:
-        with open(JOKE_PATH, "r", encoding="utf-8", newline="") as f:
-            text = f.read()
+        with open(SOURCE, encoding="utf-8", newline="") as handle:
+            raw = handle.read()
     except FileNotFoundError:
-        raise ValueError(f"joke file not found: {JOKE_PATH}")
+        raise ValueError("cannot find joke file: " + SOURCE)
     except UnicodeDecodeError as exc:
-        raise ValueError(f"joke.txt is not valid UTF-8: {exc}")
-    if not text.endswith("\n"):
-        raise ValueError("joke.txt must end with exactly one trailing newline")
-    joke = text[:-1]
-    if not joke:
+        raise ValueError("joke.txt is not valid UTF-8: " + str(exc))
+
+    if not raw.endswith("\n") or raw.count("\n") != 1:
+        raise ValueError("joke.txt must contain one line plus one newline")
+    line = raw[:-1]
+    if len(line) < 1:
         raise ValueError("joke is empty")
-    if joke != joke.strip():
-        raise ValueError("joke has leading or trailing whitespace")
-    if "\n" in joke or "\r" in joke:
-        raise ValueError(
-            f"joke must be a single line, found {text.count(chr(10))} lines"
-        )
-    if len(joke) > 200:
-        raise ValueError(f"joke is {len(joke)} characters, over the 200 limit")
-    if text != joke + "\n":
-        raise ValueError("joke.txt must be exactly one line plus one newline")
-    return joke
+    if len(line) > 200:
+        raise ValueError("joke is %d chars, over the 200 limit" % len(line))
+    if line != line.strip():
+        raise ValueError("joke must not start or end with whitespace")
+    if "\r" in line:
+        raise ValueError("joke must not contain a carriage return")
+    return line
 
 
-def verify_output(path: str, joke: str) -> None:
-    """Prove the written entry is exactly the joke, no more, no less."""
-    with open(path, "rb") as f:
-        written = f.read()
-    if written != joke.encode("utf-8"):
+def check_written(path, line):
+    """Confirm the file on disk is byte-for-byte the joke line."""
+    with open(path, "rb") as handle:
+        data = handle.read()
+    if data != line.encode("utf-8"):
         raise ValueError(
-            f"output {path} ({len(written)} bytes) is not exactly the joke "
-            f"({len(joke.encode('utf-8'))} bytes)"
+            "output %s is %d bytes, expected %d for the joke"
+            % (path, len(data), len(line.encode("utf-8")))
         )
 
 
-def main() -> None:
-    joke = load_joke()
-    output_dir = os.environ.get("MAKEFUN_OUTPUT_DIR") or "/output"
-    os.makedirs(output_dir, exist_ok=True)
-    path = os.path.join(output_dir, "entry.txt")
-    # Atomic write: a crash mid-write must never leave a partial
-    # entry.txt behind, so write a temp file in the same directory,
-    # flush it to disk, then rename it over the destination.
-    tmp_path = path + ".tmp"
-    with open(tmp_path, "w", encoding="utf-8", newline="") as f:
-        f.write(joke)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp_path, path)
-    verify_output(path, joke)
-    print(joke)
+def run():
+    line = read_joke()
+    folder = os.environ.get("MAKEFUN_OUTPUT_DIR") or "/output"
+    os.makedirs(folder, exist_ok=True)
+    dest = os.path.join(folder, "entry.txt")
+
+    # Write to a scratch file first and rename it into place, so a
+    # failure partway through never leaves a half-written entry.txt.
+    scratch = dest + ".tmp"
+    with open(scratch, "w", encoding="utf-8", newline="") as handle:
+        handle.write(line)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(scratch, dest)
+
+    check_written(dest, line)
+    print(line)
 
 
 if __name__ == "__main__":
     try:
-        main()
+        run()
     except (OSError, ValueError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        raise SystemExit(1)
+        print("error: " + str(exc), file=sys.stderr)
+        sys.exit(1)
