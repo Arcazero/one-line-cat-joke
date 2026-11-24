@@ -9,6 +9,7 @@ downloaded, and running it twice gives the same bytes twice.
 
 import os
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SOURCE = os.path.join(HERE, "joke.txt")
@@ -57,12 +58,21 @@ def run():
 
     # Write to a scratch file first and rename it into place, so a
     # failure partway through never leaves a half-written entry.txt.
-    scratch = dest + ".tmp"
-    with open(scratch, "w", encoding="utf-8", newline="") as handle:
-        handle.write(line)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(scratch, dest)
+    # The scratch name is unique per run (same folder, so the rename
+    # stays atomic), so two runs at once never collide on one file.
+    fd, scratch = tempfile.mkstemp(prefix="entry-", suffix=".tmp", dir=folder)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+            handle.write(line)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(scratch, dest)
+    except BaseException:
+        try:
+            os.unlink(scratch)
+        except OSError:
+            pass
+        raise
 
     check_written(dest, line)
     print(line)
